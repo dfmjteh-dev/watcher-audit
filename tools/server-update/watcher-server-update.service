@@ -1,0 +1,11 @@
+[Unit]
+Description=Watcher server update from web UI
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=UPDATE_DIR=/var/lib/watcher-server-update
+Environment=HOME=/root
+ExecStart=/opt/watcher-server-update/server-update.sh
+# install-server.sh перезапускает сервер и собирает комплект агентов — дольше обычного.
+TimeoutStartSec=1h

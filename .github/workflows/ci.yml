@@ -1,0 +1,257 @@
+name: CI
+
+# Экономия минут Actions (приватный репозиторий, 2000 мин/мес; Windows-джоб
+# считается вдвое): только PR в main, без повторного прогона после мержа;
+# PR только с документацией CI не запускают; новый пуш в ветку отменяет
+# незаконченный прогон. main целиком — вручную (Actions → CI → Run workflow),
+# например перед релизом: защиты веток («ветка должна быть свежей») на
+# бесплатном плане нет, сочетание двух смерженных PR отдельно не проверяется.
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: dotnet format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet format Watcher.sln --verify-no-changes
+
+  # R11 (docs/code-review-2026-10.md): установщики правят /etc/pam.d и
+  # системный bashrc на чужих машинах от root — ошибка в них дороже, чем в
+  # коде. shellcheck предустановлен на ubuntu-latest.
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck --version && git ls-files -z '*.sh' packaging/linux/watcher-agent-setup | xargs -0 shellcheck
+
+  # H3 (docs/codesign.md): сертификат подписи кода выпускается с CA:FALSE и
+  # только codeSigning (безопасно класть в Trusted Root), подписанный exe
+  # проверяется (MSI — в job msi). Без метки времени — CI не зависит от TSA.
+  authenticode:
+    name: Authenticode — сертификат и подпись
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq osslsigncode gcc-mingw-w64-x86-64
+      - name: Сертификат
+        env:
+          WATCHER_SIGN_PASSWORD: ci-throwaway-password
+        run: |
+          ./tools/codesign/new-codesign-cert.sh --name "Watcher CI" --out "$RUNNER_TEMP/cs"
+          openssl x509 -in "$RUNNER_TEMP/cs/watcher-codesign.pem" -noout -text > cert.txt
+          grep -A1 'Basic Constraints: critical' cert.txt | grep -q 'CA:FALSE'
+          grep -A1 'Extended Key Usage: critical' cert.txt | grep -qx ' *Code Signing'
+      - name: Подпись и проверка exe
+        env:
+          WATCHER_SIGN_PASSWORD: ci-throwaway-password
+          WATCHER_SIGN_TIMESTAMP: ""
+        run: |
+          # Настоящий PE (агент собирается не в этом job) — минимальная программа.
+          printf 'int main(void){return 0;}\n' | x86_64-w64-mingw32-gcc -x c - -o "$RUNNER_TEMP/agent.exe"
+          WATCHER_SIGN_PFX="$RUNNER_TEMP/cs/watcher-codesign.pfx" ./tools/codesign/sign-windows.sh "$RUNNER_TEMP/agent.exe"
+          # Повторная подпись заменяет, а не вкладывает вторую.
+          WATCHER_SIGN_PFX="$RUNNER_TEMP/cs/watcher-codesign.pfx" ./tools/codesign/sign-windows.sh "$RUNNER_TEMP/agent.exe"
+          osslsigncode verify -CAfile "$RUNNER_TEMP/cs/watcher-codesign.pem" -in "$RUNNER_TEMP/agent.exe" | tee verify.txt
+          grep -q 'Number of verified signatures: 1' verify.txt
+
+  # MSI собирается на Linux (wixl + msitools): таблицы, которые дописывает
+  # build-msi.sh (custom actions, их место в последовательности, защищённые и
+  # скрытые свойства), настройки комплекта и подпись — installer/test-msi.sh.
+  msi:
+    name: MSI (wixl) — сборка, таблицы, подпись
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq wixl msitools osslsigncode
+      - run: ./installer/test-msi.sh
+
+  # H3 (docs/roadmap-next.md): .deb/.rpm Linux-агента — сборка nfpm и установка,
+  # watcher-agent-setup, удаление в чистых контейнерах. Удаление пакета обязано
+  # снять хуки PAM/bashrc — иначе станция остаётся с хвостами в login-цепочке.
+  linux-packages:
+    name: Linux-пакеты (.deb/.rpm) — установка и удаление
+    runs-on: ubuntu-latest
+    env:
+      NFPM_VERSION: "2.47.0"
+      NFPM_SHA256: "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - name: nfpm
+        run: |
+          curl --retry 3 --retry-all-errors --retry-delay 2 --max-time 120 -fsSLo nfpm.tgz "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          echo "${NFPM_SHA256}  nfpm.tgz" | sha256sum -c
+          tar -xzf nfpm.tgz nfpm && sudo install nfpm /usr/local/bin/ && rm nfpm nfpm.tgz
+      - name: Сборка
+        run: DOTNET=dotnet ./make-bundle-linux.sh --packages
+      - name: .deb в Debian 12
+        run: docker run --rm -v "$PWD:/src" debian:12 /src/packaging/linux/test-package.sh deb "/src/$(ls dist/*.deb)"
+      - name: .rpm в Rocky Linux 9
+        run: docker run --rm -v "$PWD:/src" rockylinux:9 /src/packaging/linux/test-package.sh rpm "/src/$(ls dist/*.rpm)"
+
+  # H11/R17 (docs/roadmap-next.md): известные уязвимости в NuGet-зависимостях,
+  # включая транзитивные (SQLite и System.Text.Json приходят именно так).
+  # `dotnet list package --vulnerable` всегда выходит с 0 — падаем по выводу.
+  # Правила безопасности в коде (CA2100, CA3xxx, CA5xxx) — ошибки обычной
+  # сборки src/, см. Directory.Build.props; отдельного job им не нужно.
+  vulnerable-packages:
+    name: NuGet — уязвимые пакеты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet restore Watcher.sln
+      - name: dotnet list package --vulnerable
+        run: |
+          dotnet list Watcher.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then
+            echo "::error::Найдены уязвимые NuGet-пакеты — см. вывод выше"
+            exit 1
+          fi
+
+  # Watcher.Server runs on Linux in prod — build+test it here. Watcher.Capture.Linux
+  # (Фаза 7) тоже реально тестируется здесь, не только компилируется — Frame/
+  # MotionDetector/RingBuffer/ConfigReload не трогают X11, см. docs/development.md.
+  # Watcher.Capture (Windows)/Watcher.Uploader ещё build fine on Linux (compile-only,
+  # proven locally), так что этот job заодно ловит кросс-платформенную поломку
+  # компиляции и для них, хотя их тесты тут не гоняются.
+  build-test-ubuntu:
+    name: Build + test (ubuntu-latest) — Watcher.Server, Watcher.Capture.Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restore
+        run: dotnet restore Watcher.sln
+      - name: Build
+        run: dotnet build Watcher.sln --no-restore -c Release
+      - name: Test Watcher.Server.Tests
+        run: dotnet test tests/Watcher.Server.Tests/Watcher.Server.Tests.csproj --no-build -c Release
+      - name: Test Watcher.Capture.Linux.Tests
+        run: dotnet test tests/Watcher.Capture.Linux.Tests/Watcher.Capture.Linux.Tests.csproj --no-build -c Release
+      # Watcher.TerminalAgent (Фаза 8) — Linux-only root-агент; тесты чисто
+      # логические (парсер audit, коллектор, квоты), раньше только компилировались.
+      - name: Test Watcher.TerminalAgent.Tests
+        run: dotnet test tests/Watcher.TerminalAgent.Tests/Watcher.TerminalAgent.Tests.csproj --no-build -c Release
+
+  # Задача E6 (docs/roadmap-next.md): e2e веб-UI — настоящий Watcher.Server с
+  # чистым DataDir, данные заливаются через агентские API (tests/e2e/seed.js),
+  # Chromium через Playwright. Node нужен только этим тестам, не самому UI
+  # (ES-модули без сборки, см. E1).
+  e2e:
+    name: E2E (Playwright) — веб-UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: Install video validation dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Build Watcher.Server
+        run: dotnet build src/Watcher.Server -c Release
+      - name: Install Playwright
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run e2e
+        working-directory: tests/e2e
+        env:
+          E2E_CONFIGURATION: Release
+        run: npx playwright test
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          retention-days: 7
+
+  # H11 (docs/roadmap-next.md): образ сервера собирается на каждый PR (раньше
+  # поломку Dockerfile замечали только при деплое) и сканируется Trivy —
+  # ОС-пакеты образа и .NET-зависимости. Gate: HIGH/CRITICAL, для которых уже
+  # есть исправление (--ignore-unfixed: на неисправленное повлиять нечем).
+  # Trivy — официальный образ с закреплённой версией, не сторонний action.
+  docker-image:
+    name: Docker-образ сервера + Trivy
+    runs-on: ubuntu-latest
+    env:
+      TRIVY_IMAGE: aquasec/trivy:0.75.0
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -f src/Watcher.Server/Dockerfile -t watcher-server:ci .
+      - name: Trivy (HIGH/CRITICAL с исправлением — ошибка)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+            image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 watcher-server:ci
+
+  # H5 (docs/roadmap-next.md): сервер прошлого релиза с данными обновляется до
+  # текущего кода (миграции схемы на реальных данных), затем --backup
+  # --include-blobs → --restore в чистый каталог. fetch-depth: 0 — нужны теги.
+  upgrade:
+    name: Обновление с прошлого релиза + backup/restore
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - run: python3 tests/upgrade/upgrade_test.py
+
+  # Watcher.Capture.Tests needs real GDI+ (System.Drawing.Common throws
+  # PlatformNotSupportedException on Linux) — only runs here.
+  # Watcher.Uploader is pure file I/O and would pass on Linux too, but stays
+  # paired with Capture here per docs/development.md's документированный CI split.
+  # Watcher.SessionService.Tests (Задача 14, docs/roadmap-fixes.md) покрывает
+  # только чистую логику (SessionLogic) — на самом деле прошёл бы и на ubuntu,
+  # но остаётся здесь же, т.к. сам SessionService — RDS/Windows-компонент.
+  build-test-windows:
+    name: Build + test (windows-latest) — Watcher.Capture, Watcher.Uploader, Watcher.SessionService
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restore
+        run: dotnet restore Watcher.sln
+      - name: Build
+        run: dotnet build Watcher.sln --no-restore -c Release
+      - name: Test Watcher.Capture.Tests
+        run: dotnet test tests/Watcher.Capture.Tests/Watcher.Capture.Tests.csproj --no-build -c Release
+      - name: Test Watcher.Uploader.Tests
+        run: dotnet test tests/Watcher.Uploader.Tests/Watcher.Uploader.Tests.csproj --no-build -c Release
+      - name: Test Watcher.SessionService.Tests
+        run: dotnet test tests/Watcher.SessionService.Tests/Watcher.SessionService.Tests.csproj --no-build -c Release

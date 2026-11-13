@@ -1,0 +1,72 @@
+services:
+  watcher-server:
+    # Установочный архив релиза приносит готовый образ (docker load), из
+    # репозитория он собирается (--build) — install-server.sh задаёт версию.
+    image: watcher-server:${WATCHER_VERSION:-dev}
+    build:
+      context: .
+      dockerfile: src/Watcher.Server/Dockerfile
+    restart: unless-stopped
+    # 0.14.4: без особых прав ядра и без повышения прав (setuid) — если через
+    # пережатие (ffmpeg разбирает видео со станций) или сам сервер выполнят чужой
+    # код, выбраться из контейнера ему намного труднее. Серверу права и не нужны:
+    # он работает от app (uid 1654) и пишет только в свои тома.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    env_file:
+      - .env
+    environment:
+      - Server__DataDir=/data
+      - Server__DbPath=/data/watcher.db
+      # Комплект установки агентов (install-server.sh) — страница «Установка
+      # агентов», только чтение. Нет каталога — Docker создаст пустой.
+      - Server__AgentKitDir=/kit
+      # Обновление сервера из веб-UI: сюда сервер кладёт архив и заявку, ставит
+      # помощник на хосте (watcher-server-update, install-server.sh).
+      - Server__ServerUpdate__Dir=/updates
+      # 0.14.4: часовой пояс хоста (install-server.sh пишет WATCHER_TZ в .env) —
+      # в нём UI показывает время, а отчёты считают дни и часы.
+      - TZ=${WATCHER_TZ:-UTC}
+    volumes:
+      - watcher-data:/data
+      - ${WATCHER_MAINTENANCE_DIR:-/var/lib/watcher-server-maintenance}:/maintenance:ro
+      - ${WATCHER_KIT_DIR:-/opt/watcher-kit}:/kit:ro
+      - ${WATCHER_UPDATE_DIR:-/var/lib/watcher-server-update}:/updates
+      # База поясов хоста — та же, по которой хост знает WATCHER_TZ.
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+    expose:
+      - "5050"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  watcher-proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Caddy (root в контейнере) нужно только занять порты 80/443.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - watcher-server
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  watcher-data:
+  caddy-data:
+  caddy-config:

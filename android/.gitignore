@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+.kotlin/
+# Ключ подписи — вне репозитория (docs/android-build.md).
+*.jks
+*.keystore

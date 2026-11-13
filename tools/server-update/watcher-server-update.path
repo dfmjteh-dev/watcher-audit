@@ -1,0 +1,11 @@
+# Обновление сервера из веб-UI: сервер кладёт заявку в requests/, помощник
+# (server-update.sh) ставит архив релиза. Ставится install-server.sh.
+[Unit]
+Description=Watcher server update requests
+
+[Path]
+DirectoryNotEmpty=/var/lib/watcher-server-update/requests
+MakeDirectory=true
+
+[Install]
+WantedBy=multi-user.target

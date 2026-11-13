@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Задача D2 (roadmap-next.md): код выгрузки очереди — библиотекой. На неё
+       ссылаются Watcher.Uploader (самостоятельный процесс, Linux-станции) и
+       Watcher.SessionService (выгрузка внутри службы на Windows). Отдельно от
+       exe-проекта: ссылка exe → exe тянула бы его appsettings.json в публикацию
+       службы (NETSDK1152, конфликт с её собственным appsettings.json). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Watcher.Uploader.Core</AssemblyName>
+    <RootNamespace>Watcher.Uploader</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+  </ItemGroup>
+
+  <!-- Общие файлы агентов/сервера: один исходник, без общей сборки (development.md). -->
+  <ItemGroup>
+    <Compile Include="..\Shared\UpdateSigning.cs" Link="Shared\UpdateSigning.cs" />
+    <Compile Include="..\Shared\FfmpegArgs.cs" Link="Shared\FfmpegArgs.cs" />
+    <Compile Include="..\Shared\TranscriptIssue.cs" Link="Shared\TranscriptIssue.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\AgentDiagnostic.cs" Link="Shared\AgentDiagnostic.cs" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\UnixFile.cs" Link="Shared\UnixFile.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\MaintenanceGrant.cs" Link="Shared\MaintenanceGrant.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\UpdateProgress.cs" Link="Shared\UpdateProgress.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\DiagnosticArchive.cs" Link="Shared\DiagnosticArchive.cs" /></ItemGroup>
+</Project>

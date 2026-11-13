@@ -1,0 +1,6 @@
+{
+  "Capture": {
+    "QueueDir": "/var/lib/watcher/queue",
+    "ConfigCachePath": "/var/lib/watcher/config/capture-config.json"
+  }
+}

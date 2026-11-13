@@ -1,0 +1,24 @@
+[Unit]
+Description=Watcher Capture (Linux screen audit agent)
+# Session-bound по дизайну, не background-служба: захват осмыслен только пока
+# жива графическая сессия пользователя (нужен DISPLAY/XAUTHORITY реального X11).
+# PartOf+WantedBy на graphical-session.target — стандартный systemd/XDG способ
+# получить DISPLAY/XAUTHORITY в systemd --user без ручного экспорта: современные
+# GNOME/KDE/XFCE сами тянут эту цель при логине и прокидывают переменные туда
+# (см. docs/install.md, раздел про Linux-агент, известное ограничение по DE).
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/opt/watcher/Watcher.Capture.Linux
+Restart=on-failure
+RestartSec=5
+# Задача G1c: сегменты пишутся в общую очередь /var/lib/watcher/queue — 600,
+# чтобы другой пользователь станции не прочитал запись по угаданному имени
+# (выгружающая служба — root, ей права не мешают).
+UMask=0077
+# AtLogOn-эквивалент на Windows — тот же watchdog-смысл (упавший процесс
+# поднимается сам), но через systemd, не отдельный repeat-триггер задачи.
+
+[Install]
+WantedBy=graphical-session.target

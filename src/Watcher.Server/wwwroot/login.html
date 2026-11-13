@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Watcher</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="login.css" />
+</head>
+<body>
+
+<main class="login-box">
+  <div class="lockup">
+    <!-- Знак Watcher, полный (с уголками видоискателя), курсор мигает. -->
+    <svg class="watcher-mark blink" viewBox="0 0 120 80" fill="none" stroke-linecap="square" role="img" aria-label="Watcher">
+      <path class="cn" d="M4 14V4h10M106 4h10v10M116 66v10h-10M14 76H4V66" stroke-width="3" />
+      <path d="M16 40 32 20h56l16 20-16 20H32Z" stroke="currentColor" stroke-width="5" />
+      <path d="M44 31l9 9-9 9" stroke="currentColor" stroke-width="5" />
+      <rect x="60" y="45" width="18" height="5" />
+    </svg>
+    <div class="lk-text"><b>WATCHER</b><span>WORKSTATION AUDIT SYSTEM</span></div>
+  </div>
+
+  <form id="login-form" class="form">
+    <label for="username"><span data-t="логин">логин</span>
+      <input id="username" name="username" autocomplete="username" required autofocus spellcheck="false" /></label>
+    <label for="password"><span data-t="пароль">пароль</span>
+      <input id="password" name="password" type="password" autocomplete="current-password" required /></label>
+    <button id="submit" type="submit" data-t="ВОЙТИ">ВОЙТИ</button>
+    <div class="error" id="error" role="alert"></div>
+  </form>
+
+  <div class="foot"><span id="version">Watcher</span><span class="lang" role="group" aria-label="Language"><button type="button" data-lang="ru">RU</button><button type="button" data-lang="en">EN</button></span><span class="tagline">Who. What. When. In detail.</span></div>
+</main>
+
+<script type="module" src="login.js"></script>
+
+</body>
+</html>

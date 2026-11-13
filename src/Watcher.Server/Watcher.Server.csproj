@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Watcher.Server</AssemblyName>
+    <RootNamespace>Watcher.Server</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.33" />
+    <!-- H1: вход через AD/LDAP. Полностью управляемая (без системной libldap:
+         System.DirectoryServices.Protocols в .NET 8 не находит OpenLDAP 2.6 на
+         Debian 13 / Ubuntu 24.04). -->
+    <PackageReference Include="Novell.Directory.Ldap.NETStandard" Version="4.0.0" />
+  </ItemGroup>
+
+  <!-- Общие файлы агентов/сервера: один исходник, без общей сборки (development.md). -->
+  <ItemGroup>
+    <Compile Include="..\Shared\UpdateSigning.cs" Link="Shared\UpdateSigning.cs" />
+    <Compile Include="..\Shared\AgentConfigLimits.cs" Link="Shared\AgentConfigLimits.cs" />
+    <Compile Include="..\Shared\RecordingPause.cs" Link="Shared\RecordingPause.cs" />
+    <Compile Include="..\Shared\SafeName.cs" Link="Shared\SafeName.cs" />
+    <Compile Include="..\Shared\UserNames.cs" Link="Shared\UserNames.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\TranscriptIssue.cs" Link="Shared\TranscriptIssue.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\AgentDiagnostic.cs" Link="Shared\AgentDiagnostic.cs" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\MaintenanceGrant.cs" Link="Shared\MaintenanceGrant.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\UpdateProgress.cs" Link="Shared\UpdateProgress.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="..\Shared\DiagnosticArchive.cs" Link="Shared\DiagnosticArchive.cs" /></ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="Watcher.Server.Tests" /></ItemGroup>
+</Project>

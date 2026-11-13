@@ -1,0 +1,41 @@
+{
+	# Клиенты не шлют SNI, когда обращаются по IP (RFC 6066), — без этого
+	# Caddy не подберёт сертификат и handshake падает. Имя для таких
+	# подключений; install-server.sh ставит первый адрес из WATCHER_DOMAIN.
+	default_sni {$WATCHER_DEFAULT_SNI:localhost}
+	# 0.14.4: за внешним обратным прокси (NPM и т.п.) адрес клиента — из его
+	# X-Forwarded-For, но только если запрос пришёл с адреса из этого списка
+	# (install-server.sh --trusted-proxy). Иначе все клиенты из интернета — один
+	# адрес прокси: лимит попыток входа становится общим на всех, а журнал
+	# доступа пишет адрес прокси.
+	servers {
+		trusted_proxies static {$WATCHER_TRUSTED_PROXIES:127.0.0.1/32}
+		client_ip_headers X-Forwarded-For
+		# Справа налево до первого недоверенного: левые адреса цепочки клиент
+		# вписывает сам (прокси только дописывает справа) — им верить нельзя.
+		trusted_proxies_strict
+	}
+}
+
+{$WATCHER_DOMAIN:localhost} {
+	tls internal
+
+	# A4 (roadmap-next.md): базовые security-заголовки + CSP. С Задачи E1 UI —
+	# только внешние файлы (app.js/styles.css/vendor/), 'unsafe-inline' снят с
+	# обоих script-src и style-src. Тот же CSP сервер отдаёт и сам
+	# (SecurityHeaders.cs) — для systemd-установки без Caddy впереди; держать
+	# строки одинаковыми.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+	}
+
+	# Серверу — уже определённый адрес клиента (с учётом trusted_proxies выше),
+	# а не цепочка, в начало которой клиент мог вписать что угодно.
+	reverse_proxy watcher-server:5050 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}

@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+    <AssemblyName>Watcher.SessionService</AssemblyName>
+    <RootNamespace>Watcher.SessionService</RootNamespace>
+    <!-- Агенту не нужны данные локалей: без системной libicu (минимальный
+         AlmaLinux/Debian — падение при старте, watcher-debug 2026-10-13), числа и
+         даты — одинаково на любой станции (причина сегмента «motion 0,52%» на
+         русской Windows против «0.52%» на Linux). Регистр кириллицы в .NET 8
+         работает и в этом режиме. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+    <PackageReference Include="System.Diagnostics.EventLog" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+  <!-- Задача D2: цикл выгрузки (UploaderLoop) крутится внутри службы. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Watcher.Uploader.Core\Watcher.Uploader.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\SafeName.cs" Link="Shared\SafeName.cs" />
+    <Compile Include="..\Shared\UserNames.cs" Link="Shared\UserNames.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,31 @@
+<Project>
+
+  <!-- Две версии: сервер и агенты выпускаются независимо (релиз только сервера
+       не делает агентов «устаревшими»). ServerVersion — Watcher.Server и его
+       тесты, остальные проекты (агенты) — AgentVersion. Релиз = тег
+       vServerVersion; пакеты агентов в нём — AgentVersion, бампается только
+       если агенты менялись. См. docs/development.md, «Версионирование». -->
+  <PropertyGroup>
+    <ServerVersion>1.0.0</ServerVersion>
+    <AgentVersion>1.0.0</AgentVersion>
+    <_WatcherRel>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\','/'))</_WatcherRel>
+    <Version Condition="$(_WatcherRel.StartsWith('src/Watcher.Server')) Or $(_WatcherRel.StartsWith('tests/Watcher.Server.Tests'))">$(ServerVersion)</Version>
+    <Version Condition="'$(Version)' == ''">$(AgentVersion)</Version>
+    <!-- Без «+<коммит>» в InformationalVersion: агенты сообщают её серверу,
+         и в веб-UI версия выглядела как 0.15.1+3d60033… -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <!-- H11 (docs/roadmap-next.md): все правила безопасности .NET-анализаторов
+       (CA2100 SQL, CA3xxx инъекции, CA5xxx криптография/десериализация/поиск DLL)
+       включены и являются ошибками сборки — для кода продукта (src/), не тестов.
+       CodeQL недоступен: репозиторий приватный, без GitHub Advanced Security.
+       TreatWarningsAsErrors распространяется и на остальные CA-предупреждения —
+       в src/ их ноль, держим так. Ложное срабатывание — [SuppressMessage] с
+       Justification на конкретном методе, не отключение правила целиком. -->
+  <PropertyGroup Condition="$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').StartsWith('src'))">
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

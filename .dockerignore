@@ -1,0 +1,13 @@
+.git
+**/bin/
+**/obj/
+tools/
+# ffmpeg для пережатия записей (Dockerfile сервера, стадия ffmpeg).
+!tools/fetch-ffmpeg-linux.sh
+tests/
+src/Watcher.Capture/
+src/Watcher.Uploader/
+docs/
+*.md
+.github/
+dist/

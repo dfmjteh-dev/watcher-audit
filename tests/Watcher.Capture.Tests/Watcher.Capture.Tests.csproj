@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Watcher.Capture.Tests</RootNamespace>
+    <!-- Тот же режим, что у самого агента (InvariantGlobalization, без ICU). -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- BlockingProcess is a separate test-helper project nested in this folder — its own
+         top-level-statement Program.cs must not also be compiled into this assembly. -->
+    <Compile Remove="BlockingProcess\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Watcher.Capture\Watcher.Capture.csproj" />
+    <ProjectReference Include="BlockingProcess\BlockingProcess.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,13 @@
+# Инструменты комплекта агентов для установки из архива релиза: агенты уже
+# собраны, нужны только подпись (osslsigncode — Windows, apksigner + zipalign —
+# APK Android-агента ключом сервера), MSI (wixl, msitools) и упаковка. Без .NET
+# SDK — образ едет в архиве (make-server-bundle.sh), установке интернет не нужен.
+FROM ubuntu:24.04
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wixl msitools osslsigncode zip unzip openssl ca-certificates curl python3 \
+       openjdk-21-jre-headless libapksig-java zipalign \
+    # Пакет apksigner требует полный JRE с графикой (+400 МБ к образу); ему хватает
+    # headless — ставим его файлы без этой зависимости.
+    && cd /tmp && apt-get download apksigner && dpkg-deb -x apksigner_*.deb / && rm apksigner_*.deb \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
