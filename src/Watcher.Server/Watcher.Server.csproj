@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.33" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.34" />
     <!-- H1: вход через AD/LDAP. Полностью управляемая (без системной libldap:
          System.DirectoryServices.Protocols в .NET 8 не находит OpenLDAP 2.6 на
          Debian 13 / Ubuntu 24.04). -->
