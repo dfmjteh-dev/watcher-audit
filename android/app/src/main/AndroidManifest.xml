@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Этап 2: регистрация и heartbeat на сервер watcher (адрес вводится при
+         подключении, не зашит). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 14+: у foreground service обязателен тип. specialUse — постоянный
+         агент аудита не подходит ни под один другой тип (dataSync на 15+
+         ограничен 6 ч в сутки). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Этап 12+: удерживаем CPU, чтобы heartbeat/сбор событий шли при погашенном экране (Doze). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 13+: без разрешения служба работает, но уведомления не видно. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Этап 12: full-screen-intent поднимает экран-заглушку блокировки из фона. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Этап 12+: запись экрана по согласию (MediaProjection). На 29+ foreground
+         service типа mediaProjection обязателен, с 34 — отдельное разрешение. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Этап 3 (docs/android-plan.md): сбор событий приложений и устройства. -->
+    <!-- Тип активной сети (device_state) — обычное разрешение, выдаётся при установке. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Полный перечень установленных приложений на 30+ (diff установок/удалений).
+         <queries> не подходит: заранее неизвестно, какие пакеты окажутся на
+         устройстве. Агент распространяется in-house, не через Google Play, —
+         ограничение политики Play к нему не относится. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <!-- Доступ к статистике использования и NetworkStatsManager (UsageEvents,
+         трафик по приложениям). Специальное appops-разрешение: на НЕ-владельце
+         выдаётся через Настройки → Доступ к данным об использовании (или adb
+         appops, см. docs/android-build.md); агент — владелец устройства выдаст
+         его себе сам на Этапе 5. Объявление в манифесте обязательно, чтобы оно появилось
+         в списке. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Сервер watcher в корпоративной сети может быть доступен по обычному
+         http (как и у station-агентов — на LAN heartbeat идёт по http, см.
+         флаг lastHeartbeatHttps на сервере). Адрес задаёт админ при
+         подключении; на targetSdk 28+ без этого cleartext HTTP заблокирован.
+         Где доступен https — указывать https-адрес. -->
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_agent"
+        android:label="@string/app_name"
+        android:usesCleartextTraffic="true"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Этап 13: лаунчер киоска — домашний экран в режиме киоска (lock-task).
+             HOME-фильтр вынесен в отдельный alias (ниже), выключенный по умолчанию:
+             иначе агент был бы кандидатом на «домой» всегда и система открывала бы
+             киоск вне киоска (после ребута/переподключения сети). Саму активность
+             запускаем по имени компонента — intent-filter ей для этого не нужен. -->
+        <activity
+            android:name=".KioskActivity"
+            android:exported="true"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:lockTaskMode="if_whitelisted"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Роль домашнего экрана включаем только на время киоска
+             ([KioskController] setComponentEnabledSetting), по умолчанию выключено. -->
+        <activity-alias
+            android:name=".KioskHomeAlias"
+            android:targetActivity=".KioskActivity"
+            android:exported="true"
+            android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Этап 12: экран-заглушка удалённой блокировки устройства (lock-task). -->
+        <activity
+            android:name=".LockActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:screenOrientation="nosensor"
+            android:lockTaskMode="if_whitelisted"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
+        <!-- Этап 12+: экран согласия на запись экрана (прозрачный, виден только
+             системный диалог MediaProjection). -->
+        <activity
+            android:name=".ScreenConsentActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Этап 12+: foreground-служба записи экрана (MediaProjection). -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".AgentService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Corporate device audit agent: continuously records app usage and agent state, with a permanent notification to the employee." />
+        </service>
+
+        <!-- Этап 5 (docs/android-plan.md): администратор/владелец устройства.
+             BIND_DEVICE_ADMIN держит систему единственным, кто шлёт сюда
+             broadcasts; device_admin.xml перечисляет политики. Имя компонента
+             после назначения роли не менять — иначе слетит роль владельца. -->
+        <receiver
+            android:name=".AdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Этап 8: итог тихой установки обновления (PendingIntent от PackageInstaller). -->
+        <receiver
+            android:name=".UpdateInstallReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

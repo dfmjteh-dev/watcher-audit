@@ -1,0 +1,9 @@
+# Инструменты комплекта агентов для установки из архива релиза: агенты уже
+# собраны, нужны только подпись (osslsigncode ≥ 2.6 — подписывает и
+# PowerShell), MSI (wixl, msitools) и упаковка. Без .NET SDK — образ маленький
+# и едет в архиве (make-server-bundle.sh), установке интернет не нужен.
+FROM ubuntu:24.04
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wixl msitools osslsigncode zip unzip openssl ca-certificates curl python3 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src

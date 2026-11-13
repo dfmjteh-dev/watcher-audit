@@ -1,0 +1,23 @@
+[Unit]
+Description=Watcher Uploader (Linux, system service)
+# Задача G1c (roadmap-next.md): системная служба от root, одна на хост — не
+# systemd --user, как было до G1: секрет учётки агента не должен лежать в
+# домашнем каталоге пользователя, которого записываем. Capture каждого
+# пользователя (systemd --user) пишет в общую очередь /var/lib/watcher/queue
+# (1733: создать файл может любой, видеть и удалять чужие — нет), эта служба
+# её выгружает — и когда никто не залогинен.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/watcher-uploader/Watcher.Uploader
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

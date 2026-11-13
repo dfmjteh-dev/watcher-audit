@@ -1,0 +1,48 @@
+# H11 (docs/roadmap-next.md): плановые обновления зависимостей.
+# Мажорные версии NuGet не предлагаем: продукт на .NET 8 LTS, переход на 9/10 —
+# отдельное решение, не PR от бота. Патчи и минорные — одной пачкой на
+# экосистему, чтобы не плодить по PR на пакет. Security-обновления Dependabot
+# (если включены в настройках репозитория) приходят независимо от этих правил.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      nuget:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Базовые образы src/Watcher.Server/Dockerfile (sdk/aspnet:8.0). Тег 8.0
+  # плавающий — обновление патчей идёт само при сборке; Dependabot нужен на
+  # случай закрепления digest'а.
+  - package-ecosystem: docker
+    directory: "/src/Watcher.Server"
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Только e2e-тесты (Playwright), в продукт не попадает.
+  - package-ecosystem: npm
+    directory: "/tests/e2e"
+    schedule:
+      interval: monthly
+    groups:
+      e2e:
+        patterns: ["*"]

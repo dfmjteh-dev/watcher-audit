@@ -1,0 +1,11 @@
+{
+  "name": "watcher-e2e",
+  "private": true,
+  "description": "Задача E6 (docs/roadmap-next.md): e2e-тесты веб-UI на Playwright. Сам UI node не требует — только эти тесты.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

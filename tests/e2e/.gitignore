@@ -1,0 +1,8 @@
+node_modules/
+test-results/
+playwright-report/
+.server-data/
+.auth/
+.update-key.json
+
+.maintenance-key.pem

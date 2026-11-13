@@ -1,0 +1,86 @@
+# H3 (roadmap-next.md): пакеты .deb / .rpm Linux-агента. Собирает
+# make-bundle-linux.sh --packages (nfpm) из своего stage-каталога: пути ниже
+# относительно него. Пакет раскладывает файлы и ничего не включает; настройка —
+# watcher-agent-setup (см. packaging/linux/watcher-agent-setup).
+name: watcher-agent
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: "1"
+section: admin
+priority: optional
+maintainer: Watcher <watcher@localhost>
+description: |-
+  Watcher agent — аудит рабочих станций Linux.
+  Запись экрана пользователей рабочего стола (X11) и аудит консольных/SSH-сессий
+  (ввод через pam_tty_audit, вывод через script(1)) с выгрузкой на сервер Watcher.
+  После установки: sudo watcher-agent-setup --server-url ... --enroll-token ...
+vendor: Watcher
+homepage: https://github.com/dfmjteh-dev/watcher-audit
+license: AGPL-3.0-only
+
+depends:
+  - util-linux
+  - ca-certificates
+recommends:
+  - ffmpeg
+
+overrides:
+  deb:
+    depends:
+      - util-linux
+      - ca-certificates
+      - auditd
+  rpm:
+    depends:
+      - util-linux
+      - ca-certificates
+      - audit
+
+contents:
+  - src: ./GuardRepair
+    dst: /opt/watcher-guard/GuardRepair
+    file_info: { mode: 0755 }
+  - src: ./Watcher.Capture.Linux
+    dst: /opt/watcher-capture/Watcher.Capture.Linux
+    file_info: { mode: 0755 }
+  - src: ./pkg/Watcher.Capture.Linux.json
+    dst: /opt/watcher-capture/Watcher.Capture.Linux.json
+    type: config|noreplace
+    file_info: { mode: 0644 }
+  - src: ./Watcher.Uploader
+    dst: /opt/watcher-uploader/Watcher.Uploader
+    file_info: { mode: 0755 }
+  - src: ./Watcher.TerminalAgent
+    dst: /opt/watcher-terminal-agent/Watcher.TerminalAgent
+    file_info: { mode: 0755 }
+  - src: ./appsettings.json
+    dst: /opt/watcher-terminal-agent/appsettings.json
+    type: config|noreplace
+    file_info: { mode: 0644 }
+
+  - src: ./systemd/watcher-uploader.service
+    dst: /usr/lib/systemd/system/watcher-uploader.service
+  - src: ./systemd/watcher-terminal-agent.service
+    dst: /usr/lib/systemd/system/watcher-terminal-agent.service
+  - src: ./pkg/watcher-capture.service
+    dst: /usr/lib/systemd/user/watcher-capture.service
+
+  - src: ./pkg/watcher-agent-setup
+    dst: /usr/sbin/watcher-agent-setup
+    file_info: { mode: 0755 }
+  - src: ./install-terminal-agent.sh
+    dst: /usr/share/watcher-agent/install-terminal-agent.sh
+    file_info: { mode: 0755 }
+  - src: ./watcher-term-wrap.sh
+    dst: /usr/share/watcher-agent/watcher-term-wrap.sh
+    file_info: { mode: 0644 }
+  # H2: ставит обновление агента (запускает watcher-uploader через systemd-run).
+  - src: ./pkg/apply-update.sh
+    dst: /usr/share/watcher-agent/apply-update.sh
+    file_info: { mode: 0755 }
+
+scripts:
+  postinstall: ./pkg/postinstall.sh
+  preremove: ./pkg/preremove.sh
+  postremove: ./pkg/postremove.sh

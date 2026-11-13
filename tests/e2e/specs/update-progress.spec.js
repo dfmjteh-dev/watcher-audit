@@ -1,0 +1,35 @@
+const crypto=require('crypto');
+const fs=require('fs');
+const path=require('path');
+const {test,expect,login,F}=require('./helpers');
+
+test('Этапы обновления: причина, версии и успешный откат видны в истории',async({page,request})=>{
+  await login(page);
+  const tokenResponse=await page.request.post('/api/agents/enroll-tokens',{data:{name:'progress-ui',ttlHours:1},headers:{'X-Requested-With':'XMLHttpRequest'}});
+  const {token}=await tokenResponse.json();
+  const response=await request.post('/api/enroll',{data:{token,host:'progress-ui',kind:'video'}});
+  const {secret}=await response.json();const headers={Authorization:'Bearer '+secret};
+  const maintenanceKey=crypto.createPublicKey(fs.readFileSync(path.join(__dirname,'../.maintenance-key.pem')));
+  const keyId=crypto.createHash('sha256').update(maintenanceKey.export({type:'spki',format:'der'})).digest('hex');
+  expect((await request.post('/api/agent-diagnostics',{headers,data:{events:[],maintenanceKeyId:keyId}})).ok()).toBeTruthy();
+  const content=Buffer.from('signed-progress-fixture');const hash=crypto.createHash('sha256').update(content).digest('hex');
+  const {privateKey}=JSON.parse(fs.readFileSync(F.updateKeyFile,'utf8'));
+  const signature=crypto.sign('sha256',Buffer.from(`watcher-agent-update/1\nwindows-msi\n0.98.2\n${hash}\n`),privateKey).toString('base64');
+  const upload=await page.request.post('/api/agent-packages',{headers:{'X-Requested-With':'XMLHttpRequest'},multipart:{platform:'windows-msi',version:'0.98.2',signature,file:{name:'package.msi',mimeType:'application/octet-stream',buffer:content}}});
+  expect(upload.ok()).toBeTruthy();
+  const packages=await(await page.request.get('/api/agent-packages')).json();const packageRows=Array.isArray(packages)?packages:packages.packages;
+  const pkg=packageRows.find(p=>p.version==='0.98.2'&&p.platform==='windows-msi');expect(pkg).toBeTruthy();
+  const states=await(await page.request.get('/api/hosts/progress-ui/diagnostics/state')).json();
+  const issued=await page.request.post('/api/hosts/progress-ui/maintenance',{headers:{'X-Requested-With':'XMLHttpRequest'},data:{credentialId:states[0].credentialId,action:'update',minutes:15,packageId:pkg.id}});
+  expect(issued.ok()).toBeTruthy();const signed=await issued.json();
+  await new Promise(resolve=>setTimeout(resolve,5100));
+  const progress={grantId:signed.grant.id,revision:3,at:new Date().toISOString(),stage:'rolled-back',fromVersion:'0.98.1',toVersion:'0.98.2',reason:'install-failed',rollback:'succeeded',errorCode:1603};
+  const report=await request.post('/api/agent-diagnostics',{headers,data:{events:[],updateProgress:[progress],maintenanceResults:[{grantId:signed.grant.id,status:'failed',code:'operation-failed'}]}});
+  expect(report.ok()).toBeTruthy();
+  await page.goto('/#/hosts/progress-ui/info');
+  const panel=page.locator('.panel').filter({has:page.getByRole('heading',{name:'Обслуживание защищённого агента',exact:true})});
+  await expect(panel).toContainText('Предыдущая версия восстановлена');await expect(panel).toContainText('0.98.1 → 0.98.2');
+  await expect(panel).toContainText('Ошибка установщика');await expect(panel).toContainText('1603');await expect(panel).toContainText('Откат выполнен');
+  await expect(panel).not.toContainText('operation-failed');
+  await expect(panel).toContainText('Не выполнено');
+});

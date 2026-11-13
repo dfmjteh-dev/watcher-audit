@@ -1,0 +1,19 @@
+[Unit]
+Description=Watcher Terminal Agent (Linux console/SSH input audit collector)
+# В отличие от watcher-capture.service/watcher-uploader.service (systemd
+# --user, per-login-session) — это системная служба от root: читает общий
+# /var/log/audit/audit.log (root/adm-only), один процесс на весь хост, не на
+# сессию пользователя. См. docs/roadmap.md, Фаза 8a.
+After=auditd.service network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/watcher-terminal-agent/Watcher.TerminalAgent
+Restart=on-failure
+RestartSec=5
+# Поллинг audit.log уже fail-open сам по себе (см. Program.cs) — Restart
+# здесь на случай непредвиденного падения самого процесса, не часть
+# истории безопасности механизма.
+
+[Install]
+WantedBy=multi-user.target

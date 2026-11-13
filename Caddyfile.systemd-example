@@ -1,0 +1,50 @@
+# Шаблон для systemd-fallback деплоя (install-server.sh, без Docker) — B3,
+# docs/roadmap-next.md. install-server.sh по умолчанию слушает только
+# 127.0.0.1:5050 (EXPOSE_HTTP=true возвращает старое поведение, прямой HTTP
+# наружу без TLS) — перед ним должен стоять этот (или свой) reverse-proxy.
+#
+# Использование:
+#   1. sudo apt install caddy   (или см. https://caddyserver.com/docs/install)
+#   2. sudo cp Caddyfile.systemd-example /etc/caddy/Caddyfile
+#   3. Поправить домен в первой строке (или оставить localhost для LAN-IP).
+#   4. sudo systemctl restart caddy
+#
+# См. также основной Caddyfile (Docker Compose) — тот же набор заголовков,
+# тот же CSP (без 'unsafe-inline' с Задачи E1), что отдаёт и сам сервер
+# (SecurityHeaders.cs).
+
+{
+	# Клиенты не шлют SNI, когда обращаются по IP (RFC 6066), — без этого
+	# Caddy не подберёт сертификат и handshake падает. Имя для таких
+	# подключений; install-server.sh ставит первый адрес из WATCHER_DOMAIN.
+	default_sni {$WATCHER_DEFAULT_SNI:localhost}
+	# 0.14.4: за внешним обратным прокси (NPM и т.п.) адрес клиента — из его
+	# X-Forwarded-For, но только если запрос пришёл с адреса из этого списка
+	# (install-server.sh --trusted-proxy). Иначе все клиенты из интернета — один
+	# адрес прокси: лимит попыток входа становится общим на всех, а журнал
+	# доступа пишет адрес прокси.
+	servers {
+		trusted_proxies static {$WATCHER_TRUSTED_PROXIES:127.0.0.1/32}
+		client_ip_headers X-Forwarded-For
+		# Справа налево до первого недоверенного: левые адреса цепочки клиент
+		# вписывает сам (прокси только дописывает справа) — им верить нельзя.
+		trusted_proxies_strict
+	}
+}
+
+{$WATCHER_DOMAIN:localhost} {
+	tls internal
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+	}
+
+	# Серверу — уже определённый адрес клиента (с учётом trusted_proxies выше).
+	reverse_proxy 127.0.0.1:5050 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}

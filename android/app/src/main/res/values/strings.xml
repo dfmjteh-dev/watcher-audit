@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Watcher</string>
+    <string name="channel_name">Агент аудита</string>
+    <string name="channel_description">Постоянное уведомление: агент аудита работает</string>
+    <string name="notification_title">Устройство корпоративное</string>
+    <string name="notification_text">Действия на устройстве фиксируются агентом аудита Watcher</string>
+    <string name="status_version">Версия агента: %1$s</string>
+    <string name="status_enrolled">Подключено как «%1$s»\nСервер: %2$s</string>
+    <!-- Этап 2: форма регистрации -->
+    <string name="enroll_intro">Подключение к серверу аудита: введите адрес сервера, токен регистрации и имя устройства.</string>
+    <string name="enroll_server_url_hint">Адрес сервера (https://…)</string>
+    <string name="enroll_token_hint">Токен регистрации (wenr_…)</string>
+    <string name="enroll_host_hint">Имя устройства</string>
+    <string name="enroll_button">Подключить</string>
+    <string name="enroll_progress">Подключение…</string>
+    <string name="enroll_need_fields">Заполните адрес сервера, токен и имя устройства.</string>
+    <string name="enroll_failed">Не удалось подключиться. Проверьте адрес и токен.</string>
+    <!-- Этап 3: сбор событий -->
+    <string name="status_usage_granted">Статистика использования: доступ выдан</string>
+    <string name="status_usage_missing">Статистика использования: нужен доступ (без него не собираются запуски приложений и трафик)</string>
+    <string name="status_usage_open">Открыть доступ к статистике</string>
+    <string name="status_usage_no_settings">Экран доступа к статистике не открылся. Выдайте доступ вручную: Настройки → Приложения → Специальный доступ → Доступ к истории использования → Watcher.</string>
+    <string name="status_wifi_only">Отправлять события только по Wi-Fi</string>
+    <!-- Этап 12: удалённая блокировка устройства -->
+    <string name="lock_channel">Блокировка устройства</string>
+    <string name="lock_channel_desc">Устройство заблокировано администратором</string>
+    <string name="lock_title">Устройство заблокировано</string>
+    <string name="lock_text">Заблокировано администратором</string>
+    <string name="lock_body">Устройство заблокировано администратором. Обратитесь в ИТ-службу для разблокировки.</string>
+    <!-- Этап 13: киоск -->
+    <string name="kiosk_title">Рабочий режим</string>
+    <!-- Этап 12+: офлайн-разблокировка по учётке админа -->
+    <!-- Этап 12+: запись экрана по согласию -->
+    <string name="screen_rec_channel">Запись экрана</string>
+    <string name="screen_rec_active">Идёт запись экрана</string>
+    <string name="admin_unlock_open">Вход администратора</string>
+    <string name="admin_unlock_title">Разблокировка администратором</string>
+    <string name="admin_unlock_hint">Вход по учётной записи администратора watcher. Работает без сети.</string>
+    <string name="admin_unlock_user">Логин администратора</string>
+    <string name="admin_unlock_pw">Пароль</string>
+    <string name="admin_unlock_btn">Разблокировать</string>
+    <string name="admin_unlock_checking">Проверка…</string>
+    <string name="admin_unlock_bad">Неверный логин или пароль</string>
+</resources>

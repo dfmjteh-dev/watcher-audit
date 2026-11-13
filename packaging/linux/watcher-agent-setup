@@ -1,0 +1,280 @@
+#!/usr/bin/env bash
+# H3 (roadmap-next.md): настройка Linux-агента, установленного пакетом
+# (.deb/.rpm). Пакет только раскладывает файлы и ничего не включает — сервер
+# и токен регистрации задаются здесь:
+#
+#   sudo watcher-agent-setup --server-url https://watcher.corp --enroll-token wenr_...
+#
+# Повторный запуск безопасен (меняет настройки). --unconfigure снимает хуки
+# PAM/bashrc и выключает службы; его же вызывает пакет при удалении.
+#
+# Экран и консоль пишутся у ЛЮБОГО пользователя (экран — глобальная
+# user-служба, systemctl --global); кого не писать — решает сервер
+# (allowUsers/excludeUsers в конфиге группы), а не установка.
+set -euo pipefail
+
+SHARE=/usr/share/watcher-agent
+UPLOADER_DIR=/opt/watcher-uploader
+DATA_DIR=/var/lib/watcher
+
+SERVER_URL=""
+ENROLL_TOKEN=""
+API_TOKEN=""
+CA_CERT=""
+UPDATE_KEY=""
+SCREEN=true
+CONSOLE=true
+UNCONFIGURE=false
+
+usage() {
+  cat <<'EOF'
+Использование:
+  watcher-agent-setup --server-url URL [--enroll-token TOKEN] [--api-token TOKEN]
+                      [--ca-cert FILE] [--update-key KEY] [--no-screen] [--no-console]
+  watcher-agent-setup --unconfigure
+
+  --server-url    адрес сервера Watcher (https://...)
+  --enroll-token  токен регистрации (веб-UI: Настройки → Агенты)
+  --api-token     общий токен (устаревший путь, до учёток агентов)
+  --ca-cert       корневой CA сервера (PEM), если сертификат сервера самоподписанный
+  --update-key    открытый ключ обновлений (строка base64, update-key.pub.txt):
+                  станция сама ставит версии, назначенные группе на сервере,
+                  проверив подпись; без параметра остаётся прежний ключ
+  --maintenance-key  публичный pin команд обслуживания (готовый комплект задаёт сам)
+  --recovery-package FILE   подписанный DEB/RPM для начальной базы ремонта
+  --recovery-manifest FILE  манифест начальной базы (.recovery.json)
+  --no-screen     не записывать экран (сервер без рабочего стола); с ключом
+                  обновлений выгрузка всё равно работает — ради обновлений
+  --no-console    не записывать консоль/SSH (по умолчанию пишутся все
+                  пользователи; кого не писать — конфиг группы на сервере)
+  --unconfigure   выключить службы и снять хуки PAM/bashrc (данные остаются)
+EOF
+}
+
+MAINTENANCE_KEY=""
+RECOVERY_PACKAGE=""
+RECOVERY_MANIFEST=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --server-url) SERVER_URL="$2"; shift 2 ;;
+    --enroll-token) ENROLL_TOKEN="$2"; shift 2 ;;
+    --api-token) API_TOKEN="$2"; shift 2 ;;
+    --ca-cert) CA_CERT="$2"; shift 2 ;;
+    # До 0.12 — кого записывать в консоли; теперь пишутся все, фильтр на сервере.
+    --users) echo "ВНИМАНИЕ: --users больше не нужен и игнорируется — консоль пишется у всех," >&2
+             echo "кого не писать — excludeUsers/allowUsers в конфиге группы на сервере." >&2
+             shift 2 ;;
+    --no-console) CONSOLE=false; shift ;;
+    --update-key) UPDATE_KEY="$2"; shift 2 ;;
+    --recovery-package) RECOVERY_PACKAGE="$2"; shift 2 ;;
+    --recovery-manifest) RECOVERY_MANIFEST="$2"; shift 2 ;;
+    --maintenance-key) MAINTENANCE_KEY="$2"; shift 2 ;;
+    --no-screen) SCREEN=false; shift ;;
+    --unconfigure) UNCONFIGURE=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Неизвестный аргумент: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [ "$(id -u)" != "0" ]; then
+  echo "Запускайте от root: sudo watcher-agent-setup ..." >&2
+  exit 1
+fi
+
+# В контейнере / chroot без systemd пакет ставится, но службы не включить.
+have_systemd() { [ -d /run/systemd/system ]; }
+
+if [ "$UNCONFIGURE" = true ]; then
+  if have_systemd; then
+    systemctl disable --now watcher-uploader.service 2>/dev/null || true
+    systemctl --global disable watcher-capture.service 2>/dev/null || true
+  fi
+  # Хуки PAM/bashrc и служба консоли — тем же кодом, что их ставил.
+  if have_systemd || [ -f /etc/watcher-term-wrap.sh ]; then
+    "$SHARE/install-terminal-agent.sh" --packaged --uninstall >/dev/null
+  fi
+  rm -f "$UPLOADER_DIR/Watcher.Uploader.json"
+  echo "Службы Watcher выключены, хуки консоли сняты. Данные (очередь, учётки"
+  echo "агента) — в $DATA_DIR и /var/lib/watcher-terminal-agent."
+  exit 0
+fi
+
+if [ -z "$SERVER_URL" ]; then
+  usage >&2
+  exit 1
+fi
+
+case "$SERVER_URL" in
+  http://*)
+    host="${SERVER_URL#http://}"; host="${host%%[:/]*}"
+    if [ "$host" != "localhost" ] && [ "$host" != "127.0.0.1" ]; then
+      echo "ПРЕДУПРЕЖДЕНИЕ: http:// на $host — записи и токены пойдут по сети" >&2
+      echo "открытым текстом. Рекомендуется https:// (docs/install.md, «HTTPS для агентов»)." >&2
+    fi
+    ;;
+esac
+
+# Установка tar.gz-скриптами до пакета: их юниты в /etc перекрывают юниты
+# пакета, а пользовательский watcher-capture.service в ~/.config — глобальный.
+for u in watcher-uploader watcher-terminal-agent; do
+  if [ -f "/etc/systemd/system/$u.service" ]; then
+    echo "Убираю $u.service прежней установки скриптом из /etc/systemd/system"
+    rm -f "/etc/systemd/system/$u.service"
+  fi
+done
+old_capture=$(ls /home/*/.config/systemd/user/watcher-capture.service /root/.config/systemd/user/watcher-capture.service 2>/dev/null || true)
+if [ -n "$old_capture" ]; then
+  echo "ВНИМАНИЕ: Capture, установленный скриптом, перекрывает службу пакета у:" >&2
+  for f in $old_capture; do echo "  $f" >&2; done
+  echo "Снимите его от имени каждого пользователя: install-capture-linux.sh --uninstall" >&2
+  echo "(или удалите файл юнита и ~/.local/opt/watcher)." >&2
+fi
+
+if [ -n "$CA_CERT" ]; then
+  echo "Устанавливаю корневой CA сервера в системное хранилище..."
+  if command -v update-ca-certificates >/dev/null 2>&1; then
+    install -m 644 "$CA_CERT" /usr/local/share/ca-certificates/watcher-server-ca.crt
+    update-ca-certificates >/dev/null
+  elif command -v update-ca-trust >/dev/null 2>&1; then
+    install -m 644 "$CA_CERT" /etc/pki/ca-trust/source/anchors/watcher-server-ca.crt
+    update-ca-trust extract
+  else
+    echo "Нет ни update-ca-certificates, ни update-ca-trust — добавьте $CA_CERT в доверенные вручную." >&2
+  fi
+fi
+
+if [ -z "$ENROLL_TOKEN" ] && [ -z "$API_TOKEN" ] && [ ! -f "$DATA_DIR/agent/credential.json" ] && [ ! -f /var/lib/watcher-terminal-agent/agent/credential.json ]; then
+  echo "ПРЕДУПРЕЖДЕНИЕ: нет ни --enroll-token, ни --api-token, и учётки агента ещё нет —" >&2
+  echo "выгрузка на сервер работать не будет. Токен регистрации: веб-UI, Настройки → Агенты." >&2
+fi
+
+daemon_reload() {
+  if have_systemd; then systemctl daemon-reload; fi
+}
+
+# H2: ключ обновлений не передан — оставить прежний (повторный setup не должен
+# молча выключать автообновление).
+if [ -z "$UPDATE_KEY" ] && [ -f "$UPLOADER_DIR/Watcher.Uploader.json" ]; then
+  UPDATE_KEY="$(sed -n 's/.*"UpdatePublicKey": *"\([A-Za-z0-9+\/=]*\)".*/\1/p' "$UPLOADER_DIR/Watcher.Uploader.json" | head -n 1)"
+fi
+case "$UPDATE_KEY" in
+  *[!A-Za-z0-9+/=]*) echo "--update-key: строка base64 из update-key.pub.txt" >&2; exit 1 ;;
+esac
+
+# Выгрузка (watcher-uploader) нужна экрану и обновлениям: она же шлёт
+# heartbeat и ставит новые версии (H2).
+if [ "$SCREEN" = true ] || [ -n "$UPDATE_KEY" ]; then
+  if [ "$SCREEN" = true ] && ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "ПРЕДУПРЕЖДЕНИЕ: ffmpeg не найден — экран писаться не будет (apt install ffmpeg;" >&2
+    echo "на RHEL-семействе — из RPM Fusion)." >&2
+  fi
+  if [ "$SCREEN" = true ]; then
+    echo "=== Экран: выгрузка ($UPLOADER_DIR) и запись у пользователей рабочего стола ==="
+  else
+    echo "=== Выгрузка ($UPLOADER_DIR) — только heartbeat и обновления, экран не пишется ==="
+  fi
+  install -d -m 755 "$DATA_DIR" "$DATA_DIR/config"
+  install -d -m 1733 "$DATA_DIR/queue"
+  install -d -m 700 "$DATA_DIR/sent" "$DATA_DIR/logs" "$DATA_DIR/updates"
+  # Тот же конфиг, что пишет install-capture-linux.sh. 600 root, под umask —
+  # в файле токен; ни мгновения с правами по умолчанию.
+  ( umask 077; cat > "$UPLOADER_DIR/Watcher.Uploader.json" <<EOF
+{
+  "Uploader": {
+    "ServerUrl": "$SERVER_URL",
+    "EnrollToken": "$ENROLL_TOKEN",
+    "ApiToken": "$API_TOKEN",
+    "CredentialPath": "$DATA_DIR/agent/credential.json",
+    "QueueDir": "$DATA_DIR/queue",
+    "SentDir": "$DATA_DIR/sent",
+    "LogDir": "$DATA_DIR/logs",
+    "ConfigCachePath": "$DATA_DIR/config/capture-config.json",
+    "FfmpegPath": "ffmpeg",
+    "UpdatePublicKey": "$UPDATE_KEY",
+    "UpdateDir": "$DATA_DIR/updates"
+  }
+}
+EOF
+  )
+  daemon_reload
+  if have_systemd; then
+    systemctl enable watcher-uploader.service >/dev/null 2>&1
+    systemctl restart watcher-uploader.service
+    if [ "$SCREEN" = true ]; then
+      systemctl --global enable watcher-capture.service >/dev/null 2>&1
+    else
+      systemctl --global disable watcher-capture.service 2>/dev/null || true
+    fi
+  fi
+  if [ "$SCREEN" = true ]; then
+    echo "  запись экрана начнётся со следующего входа пользователя в графическую сессию"
+  fi
+  if [ -n "$UPDATE_KEY" ]; then
+    echo "  автообновление: включено (ключ обновлений задан)"
+  else
+    echo "  автообновление: выключено (нет --update-key)"
+  fi
+else
+  if have_systemd; then
+    systemctl disable --now watcher-uploader.service 2>/dev/null || true
+    systemctl --global disable watcher-capture.service 2>/dev/null || true
+  fi
+  rm -f "$UPLOADER_DIR/Watcher.Uploader.json"
+fi
+
+if [ "$CONSOLE" = true ]; then
+  echo "=== Консоль/SSH: все пользователи ==="
+  "$SHARE/install-terminal-agent.sh" --packaged --server-url "$SERVER_URL" \
+    --enroll-token "$ENROLL_TOKEN" --api-token "$API_TOKEN"
+else
+  echo "=== Консоль/SSH: не записывается (--no-console) ==="
+  "$SHARE/install-terminal-agent.sh" --packaged --uninstall
+fi
+
+# Службы запущены — но живы ли? Агент, упавший при старте (на 0.12.2 — нет
+# libicu на минимальном AlmaLinux), уходит в цикл перезапусков, а установка
+# выглядела успешной: «Готово», хост на сервере просто не появлялся.
+check_alive() {
+  have_systemd || return 0
+  units=""
+  if [ "$SCREEN" = true ] || [ -n "$UPDATE_KEY" ]; then units="watcher-uploader"; fi
+  [ "$CONSOLE" = true ] && units="$units watcher-terminal-agent"
+  [ -n "$units" ] || return 0
+  # Прирост перезапусков за время ожидания, не абсолютное число: счётчик
+  # мог остаться от прошлой, уже исправленной неудачной установки.
+  declare -A before=()
+  for u in $units; do
+    before[$u]=$(systemctl show -p NRestarts --value "$u.service" 2>/dev/null || echo 0)
+  done
+  sleep "${WATCHER_SETUP_CHECK_DELAY:-8}"
+  bad=""
+  for u in $units; do
+    was=${before[$u]}
+    now=$(systemctl show -p NRestarts --value "$u.service" 2>/dev/null || echo 0)
+    if ! systemctl is-active --quiet "$u.service" || [ "${now:-0}" -gt "${was:-0}" ]; then
+      bad="$bad $u"
+      echo "ОШИБКА: служба $u не работает (перезапусков за ${WATCHER_SETUP_CHECK_DELAY:-8} с: $(( ${now:-0} - ${was:-0} ))). Последние строки журнала:" >&2
+      journalctl -u "$u.service" -n 15 --no-pager >&2 2>/dev/null || true
+    fi
+  done
+  if [ -n "$bad" ]; then
+    echo >&2
+    echo "Установка НЕ завершена: не запустились:$bad. Исправьте причину из журнала и" >&2
+    echo "запустите watcher-agent-setup ещё раз." >&2
+    exit 1
+  fi
+}
+check_alive
+if [ -n "$MAINTENANCE_KEY" ]; then
+  # 0.16: GuardRepair setup (бывший setup-guard.sh); распаковка — в закрытый каталог Guard.
+  [ ! -L /var/lib/watcher/guard ] || { echo "/var/lib/watcher/guard — символическая ссылка, защиту не включаю" >&2; exit 1; }
+  install -d -m 700 /var/lib/watcher/guard
+  DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/lib/watcher/guard/bundle /opt/watcher-guard/GuardRepair setup \
+    "$MAINTENANCE_KEY" "$UPDATE_KEY" "$SERVER_URL" "$RECOVERY_PACKAGE" "$RECOVERY_MANIFEST"
+fi
+
+echo
+echo "Готово. Проверить:"
+[ "$SCREEN" = true ] && echo "  systemctl status watcher-uploader; systemctl --user status watcher-capture (от пользователя)"
+[ "$CONSOLE" = true ] && echo "  systemctl status watcher-terminal-agent"
+exit 0

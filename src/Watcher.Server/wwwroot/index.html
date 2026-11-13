@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Watcher</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<!-- Этап E1 (roadmap-next.md): ни инлайн-<script>, ни инлайн-<style>, ни style=
+     — CSP без 'unsafe-inline' (A4, Caddyfile/Program.cs). Весь UI — ES-модули
+     от app.js, Preact + htm лежат в vendor/ (без CDN: сервер часто в LAN без
+     интернета). -->
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="vendor/xterm.css" />
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div id="app"></div>
+</body>
+</html>

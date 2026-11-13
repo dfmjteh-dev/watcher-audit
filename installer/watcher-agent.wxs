@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSI агента Windows (Capture + SessionService + ffmpeg; GuardRepair — в WatcherGuard\setup).
+  Собирается на Linux — wixl из msitools (installer/build-msi.sh), без
+  Windows и WiX Toolset: так MSI выпускает и CI, и install-server.sh при
+  установке сервера (комплект агентов, уже настроенный на этот сервер).
+
+  wixl понимает подмножество WiX 3. Чего он не умеет, build-msi.sh дописывает
+  в таблицы готового MSI через msibuild (SQL):
+    - custom actions RunInstallScript/RunUninstallScript (тип 18 — GuardRepair.exe
+      agent-install/agent-uninstall из таблицы File, deferred, без имперсонации:
+      служба и ACL на конфиг с токеном ставятся от SYSTEM; 0.16 — без PowerShell)
+      и их место в InstallExecuteSequence — внутри InstallInitialize..InstallFinalize;
+    - SecureCustomProperties (иначе значения из командной строки msiexec не
+      доходят до deferred-действия) и MsiHiddenProperties (токены не пишутся в
+      журнал msiexec /l*v);
+    - значения свойств по умолчанию для настроенного комплекта (адрес сервера и
+      т.д.) — тогда MSI ставится двойным щелчком или GPO без параметров.
+
+  Свойства (msiexec ... СВОЙСТВО=значение перекрывает зашитое):
+    SERVERURL     адрес сервера, https://...
+    ENROLLTOKEN   токен регистрации (веб-UI: Настройки → Агенты)
+    APITOKEN      общий токен парка — устаревший путь, до учёток агентов
+    UPDATEKEY     открытый ключ обновлений — служба сама ставит версии с сервера
+    CACERT        корневой CA сервера, base64 DER — импортируется в LocalMachine\Root
+    TERMINALAUDIT 1 (по умолчанию) — консольный аудит SSH-сессий, 0 — выключить
+
+  UpgradeCode — тот же, что у прежнего WiX 5 Package.wxs: MajorUpgrade
+  находит и заменяет MSI прежних версий. Никогда не менять.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Watcher Agent"
+           Manufacturer="Watcher"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="B57CFE32-A5D4-4ACC-8E2E-796E4F6B05C7"
+           Language="1033"
+           Codepage="1252">
+
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+             Description="Watcher Agent (Capture + SessionService)" Manufacturer="Watcher" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Watcher Agent is already installed." />
+    <!-- Preflight запускается из Binary до удаления прежнего payload. -->
+    <Binary Id="LegacyRecovery" SourceFile="$(var.PayloadDir)/GuardRepair.exe" />
+    <Media Id="1" Cabinet="watcher.cab" EmbedCab="yes" />
+
+    <Property Id="SERVERURL" Secure="yes" />
+    <Property Id="APITOKEN" Secure="yes" />
+    <Property Id="ENROLLTOKEN" Secure="yes" />
+    <Property Id="MAINTENANCEKEY" Secure="yes" />
+    <Property Id="UPDATEKEY" Secure="yes" />
+    <Property Id="CACERT" Secure="yes" />
+    <Property Id="TERMINALAUDIT" Secure="yes" Value="1" />
+    <!-- AppSearch выполняется до RemoveExistingProducts: старый uninstall удалит службу. -->
+    <Property Id="WATCHERSERVICESTART" Secure="yes" Value="0">
+      <RegistrySearch Id="WatcherServiceStart" Root="HKLM"
+                      Key="SYSTEM\CurrentControlSet\Services\WatcherSessionService"
+                      Name="Start" Type="raw" Win64="yes" />
+    </Property>
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- Свежая установка без адреса сервера — явная ошибка msiexec, а не
+         установщик, упавший глубоко в последовательности. Удаление/repair
+         установленного продукта не блокирует. -->
+    <Condition Message="SERVERURL is required, e.g.: msiexec /i watcher-agent.msi SERVERURL=https://watcher.corp /qn">Installed OR SERVERURL</Condition>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <!-- 0.16: GuardRepair (установка агента и независимый ремонт) — в своём
+             каталоге, не в каталоге агента. Guard запускает себя из bin\<hash>, этот
+             экземпляр — источник для установки и custom actions MSI. -->
+        <Directory Id="GUARDFOLDER" Name="WatcherGuard">
+          <Directory Id="GUARDSETUPFOLDER" Name="setup">
+            <Component Id="GuardExe" Guid="*" Win64="yes"><File Id="GuardExe" Source="$(var.PayloadDir)/GuardRepair.exe" KeyPath="yes" /></Component>
+          </Directory>
+        </Directory>
+        <Directory Id="INSTALLFOLDER" Name="Watcher">
+          <Component Id="CaptureExe" Guid="*" Win64="yes">
+            <File Id="CaptureExe" Source="$(var.PayloadDir)/Watcher.Capture.exe" KeyPath="yes" />
+          </Component>
+          <Component Id="SessionServiceExe" Guid="*" Win64="yes">
+            <File Id="SessionServiceExe" Source="$(var.PayloadDir)/Watcher.SessionService.exe" KeyPath="yes" />
+          </Component>
+          <Component Id="FfmpegExe" Guid="*" Win64="yes">
+            <File Id="FfmpegExe" Source="$(var.PayloadDir)/ffmpeg.exe" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Main" Title="Watcher Agent" Level="1">
+      <ComponentRef Id="CaptureExe" />
+      <ComponentRef Id="SessionServiceExe" />
+      <ComponentRef Id="GuardExe" />
+      <ComponentRef Id="FfmpegExe" />
+    </Feature>
+  </Product>
+</Wix>
